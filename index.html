@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>対話AI — Gemini Chat (学習用)</title>
+<style>
+  /* ============================================================
+     デザイントークン（色・余白などをここで一元管理）
+     ============================================================ */
+  :root{
+    --bg:        #EDEEEA;   /* 背景（クールな紙色） */
+    --surface:   #FFFFFF;   /* カード・パネル */
+    --surface-2: #FBFBF9;
+    --ink:       #1B1E1A;   /* 文字（ほぼ黒） */
+    --muted:     #6B7066;   /* 補助テキスト */
+    --border:    #DDDED8;
+    --user:      #14534C;   /* ユーザー吹き出し（ディープティール） */
+    --user-ink:  #F2F5F2;
+    --accent:    #E07B39;   /* アクセント（安全色系アンバー） */
+    --accent-2:  #C4691F;   /* アクセント濃（hover） */
+    --error:     #B23A2E;
+    --ok:        #2E8B57;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN",
+            "Hiragino Sans", "Noto Sans JP", "Segoe UI", Roboto, sans-serif;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; margin:0; }
+  body{
+    font-family:var(--sans);
+    color:var(--ink);
+    background:var(--bg);
+    display:flex; flex-direction:column;
+    height:100dvh;
+  }
+
+  /* ---------- ヘッダー（ステータスライン） ---------- */
+  header{
+    flex:0 0 auto;
+    display:flex; align-items:center; gap:12px;
+    padding:10px 16px;
+    background:var(--surface);
+    border-bottom:1px solid var(--border);
+  }
+  .brand{ font-family:var(--mono); font-weight:600; letter-spacing:.5px; font-size:14px; }
+  .brand .accent{ color:var(--accent); }
+  .status{
+    font-family:var(--mono); font-size:11px; color:var(--muted);
+    display:flex; align-items:center; gap:6px; margin-left:auto;
+  }
+  .dot{ width:8px; height:8px; border-radius:50%; background:var(--muted); }
+  .dot.ready{ background:var(--ok); }
+  .dot.busy{ background:var(--accent); animation:pulse 1s ease-in-out infinite; }
+  .dot.err{ background:var(--error); }
+  @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.3} }
+  .icon-btn{
+    font-family:var(--mono); font-size:12px;
+    background:transparent; border:1px solid var(--border); color:var(--ink);
+    padding:6px 10px; border-radius:8px; cursor:pointer;
+  }
+  .icon-btn:hover{ background:var(--surface-2); }
+
+  /* ---------- 設定パネル ---------- */
+  .settings{
+    flex:0 0 auto; background:var(--surface-2);
+    border-bottom:1px solid var(--border);
+    overflow:hidden; max-height:0; transition:max-height .25s ease;
+  }
+  .settings.open{ max-height:520px; }
+  .settings-inner{ padding:14px 16px; display:grid; gap:12px; max-width:760px; margin:0 auto; }
+  .field{ display:grid; gap:5px; }
+  .field label{ font-family:var(--mono); font-size:11px; color:var(--muted); }
+  .field input, .field select, .field textarea{
+    font-family:var(--sans); font-size:14px; color:var(--ink);
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:8px; padding:9px 11px; width:100%;
+  }
+  .field textarea{ resize:vertical; min-height:60px; line-height:1.5; }
+  .field .hint{ font-size:11px; color:var(--muted); line-height:1.5; }
+  .field .hint a{ color:var(--accent-2); }
+  .row{ display:flex; gap:10px; flex-wrap:wrap; }
+  .row > *{ flex:1; min-width:160px; }
+
+  /* ---------- メッセージ表示エリア ---------- */
+  .chat{
+    flex:1 1 auto; overflow-y:auto; padding:20px 16px;
+    display:flex; flex-direction:column; gap:14px;
+  }
+  .chat-inner{ width:100%; max-width:760px; margin:0 auto; display:flex; flex-direction:column; gap:14px; }
+  .msg{ display:flex; gap:10px; max-width:88%; }
+  .msg.user{ align-self:flex-end; flex-direction:row-reverse; }
+  .msg.model{ align-self:flex-start; }
+  .avatar{
+    flex:0 0 auto; width:28px; height:28px; border-radius:8px;
+    display:grid; place-items:center; font-family:var(--mono); font-size:11px; font-weight:600;
+    background:var(--surface); border:1px solid var(--border); color:var(--muted);
+  }
+  .msg.user .avatar{ background:var(--user); color:var(--user-ink); border-color:var(--user); }
+  .bubble{
+    padding:11px 14px; border-radius:14px; line-height:1.65; font-size:15px;
+    word-break:break-word; white-space:normal;
+  }
+  .msg.model .bubble{ background:var(--surface); border:1px solid var(--border); border-top-left-radius:4px; }
+  .msg.user  .bubble{ background:var(--user); color:var(--user-ink); border-top-right-radius:4px; }
+  .msg.error .bubble{ background:#FBEDEB; border:1px solid #E7C3BD; color:var(--error); font-size:13px; }
+  /* 簡易マークダウンの見た目 */
+  .bubble code{ font-family:var(--mono); font-size:.86em; background:rgba(0,0,0,.06); padding:1px 5px; border-radius:5px; }
+  .msg.user .bubble code{ background:rgba(255,255,255,.18); }
+  .bubble pre{ background:#1B1E1A; color:#EDEEEA; padding:12px; border-radius:10px; overflow-x:auto; margin:8px 0; }
+  .bubble pre code{ background:none; padding:0; color:inherit; }
+  .bubble strong{ font-weight:700; }
+
+  /* 入力中インジケーター */
+  .typing{ display:flex; gap:4px; padding:4px 2px; }
+  .typing span{ width:7px; height:7px; border-radius:50%; background:var(--muted); animation:bounce 1.2s infinite; }
+  .typing span:nth-child(2){ animation-delay:.15s; }
+  .typing span:nth-child(3){ animation-delay:.3s; }
+  @keyframes bounce{ 0%,60%,100%{ transform:translateY(0); opacity:.4 } 30%{ transform:translateY(-5px); opacity:1 } }
+
+  .empty{ margin:auto; text-align:center; color:var(--muted); max-width:420px; }
+  .empty h2{ font-family:var(--mono); font-size:15px; font-weight:600; color:var(--ink); margin:0 0 8px; }
+  .empty p{ font-size:13px; line-height:1.7; margin:0; }
+
+  /* ---------- 入力ドック ---------- */
+  .dock{
+    flex:0 0 auto; border-top:1px solid var(--border); background:var(--surface);
+    padding:12px 16px;
+  }
+  .dock-inner{ max-width:760px; margin:0 auto; display:flex; gap:10px; align-items:flex-end; }
+  #input{
+    flex:1; font-family:var(--sans); font-size:15px; line-height:1.5; color:var(--ink);
+    background:var(--surface-2); border:1px solid var(--border); border-radius:12px;
+    padding:11px 13px; resize:none; max-height:160px; min-height:46px;
+  }
+  #input:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+  #send{
+    flex:0 0 auto; font-family:var(--mono); font-weight:600; font-size:13px;
+    background:var(--accent); color:#fff; border:none; border-radius:12px;
+    padding:0 18px; height:46px; cursor:pointer;
+  }
+  #send:hover{ background:var(--accent-2); }
+  #send:disabled{ background:var(--muted); cursor:not-allowed; }
+  .dock-note{ max-width:760px; margin:6px auto 0; font-size:11px; color:var(--muted); font-family:var(--mono); }
+
+  @media (max-width:520px){
+    .msg{ max-width:96%; }
+    .brand{ font-size:13px; }
+  }
+</style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">対話AI<span class="accent">.</span>gemini</div>
+    <button class="icon-btn" id="clearBtn" title="会話をリセット">clear</button>
+    <button class="icon-btn" id="gearBtn" title="設定">⚙ 設定</button>
+    <div class="status">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">APIキー未設定</span>
+    </div>
+  </header>
+
+  <!-- 設定パネル -->
+  <section class="settings" id="settings">
+    <div class="settings-inner">
+      <div class="field">
+        <label>GEMINI API KEY</label>
+        <input type="password" id="apiKey" placeholder="AIza... で始まるキーを貼り付け" autocomplete="off">
+        <div class="hint">
+          キーは <strong>このブラウザ内だけ</strong> に保存されます（サーバーには送りません）。
+          未取得なら <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> で無料発行できます。
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>MODEL</label>
+          <select id="model">
+            <option value="gemini-2.5-flash">gemini-2.5-flash（無料・推奨）</option>
+            <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite（軽量・高速）</option>
+            <option value="gemini-2.5-pro">gemini-2.5-pro（高性能・低レート）</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>TEMPERATURE（0〜1：高いほど多様）</label>
+          <input type="number" id="temp" value="0.7" min="0" max="2" step="0.1">
+        </div>
+      </div>
+      <div class="field">
+        <label>SYSTEM PROMPT（AIの役割・口調の指示）</label>
+        <textarea id="systemPrompt">あなたは親切で有能な日本語アシスタントです。簡潔で分かりやすく、標準語で回答してください。</textarea>
+      </div>
+    </div>
+  </section>
+
+  <!-- メッセージ -->
+  <main class="chat" id="chat">
+    <div class="chat-inner" id="chatInner">
+      <div class="empty" id="empty">
+        <h2>会話を始めましょう</h2>
+        <p>右上の「⚙ 設定」から API キーを入れて、下の欄にメッセージを入力してください。<br>
+        会話履歴はそのまま AI に送られるので、文脈を保ったやり取りができます。</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- 入力 -->
+  <div class="dock">
+    <div class="dock-inner">
+      <textarea id="input" placeholder="メッセージを入力（Enterで送信 / Shift+Enterで改行）" rows="1"></textarea>
+      <button id="send">送信</button>
+    </div>
+    <div class="dock-note">※ クライアント側でキーを使う簡易版です。公開共有する場合は GAS などのプロキシ経由を推奨。</div>
+  </div>
+
+<script>
+/* ================================================================
+   対話AI（Gemini）— 学習用の最小実装
+   ----------------------------------------------------------------
+   仕組みの核は3ステップだけ：
+   (1) ユーザー入力を「会話履歴(history)」に追加
+   (2) 履歴まるごとを Gemini API に送る  ← これが“文脈”の正体
+   (3) 返ってきたテキストを履歴に追加して画面に描画
+   ================================================================ */
+
+// ---- 画面要素の取得 ----
+const el = id => document.getElementById(id);
+const chatInner = el('chatInner');
+const inputBox  = el('input');
+const sendBtn   = el('send');
+const statusDot = el('statusDot');
+const statusText= el('statusText');
+
+// ---- 状態 ----
+// history は Gemini の形式に合わせて { role, text } で持つ。
+// role は 'user'（ユーザー） か 'model'（AI）。
+let history = [];
+let busy = false;
+
+// ---- 設定の保存・復元（localStorage。使えない環境では握りつぶす） ----
+const store = {
+  get(k, def){ try{ const v = localStorage.getItem(k); return v===null ? def : v; }catch(e){ return def; } },
+  set(k, v){ try{ localStorage.setItem(k, v); }catch(e){} }
+};
+function loadSettings(){
+  el('apiKey').value       = store.get('gemini_key', '');
+  el('model').value        = store.get('gemini_model', 'gemini-2.5-flash');
+  el('temp').value         = store.get('gemini_temp', '0.7');
+  el('systemPrompt').value = store.get('gemini_system', el('systemPrompt').value);
+  updateStatus();
+}
+function saveSettings(){
+  store.set('gemini_key',    el('apiKey').value.trim());
+  store.set('gemini_model',  el('model').value);
+  store.set('gemini_temp',   el('temp').value);
+  store.set('gemini_system', el('systemPrompt').value);
+  updateStatus();
+}
+['apiKey','model','temp','systemPrompt'].forEach(id => el(id).addEventListener('input', saveSettings));
+
+// ---- ステータス表示の更新 ----
+function updateStatus(state){
+  const hasKey = !!el('apiKey').value.trim();
+  if(state === 'busy'){ statusDot.className='dot busy'; statusText.textContent='生成中…'; return; }
+  if(state === 'err'){  statusDot.className='dot err';  statusText.textContent='エラー'; return; }
+  if(hasKey){ statusDot.className='dot ready'; statusText.textContent = el('model').value; }
+  else      { statusDot.className='dot';       statusText.textContent='APIキー未設定'; }
+}
+
+// ---- 設定パネルの開閉 ----
+el('gearBtn').addEventListener('click', ()=> el('settings').classList.toggle('open'));
+
+// ---- 会話リセット ----
+el('clearBtn').addEventListener('click', ()=>{
+  if(history.length && !confirm('会話をすべて消去します。よろしいですか？')) return;
+  history = [];
+  chatInner.innerHTML = '<div class="empty" id="empty"><h2>会話を始めましょう</h2><p>下の欄にメッセージを入力してください。</p></div>';
+});
+
+/* ----------------------------------------------------------------
+   超簡易マークダウン整形（依存ライブラリなし）
+   - HTMLエスケープ → コードブロック → インラインコード → 太字 → 改行
+   ---------------------------------------------------------------- */
+function escapeHtml(s){
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function renderMarkdown(text){
+  const blocks = [];
+  // ```code``` を退避
+  let t = text.replace(/```(\w+)?\n?([\s\S]*?)```/g, (_, lang, code)=>{
+    blocks.push('<pre><code>'+escapeHtml(code.replace(/\n$/,''))+'</code></pre>');
+    return '\u0000'+(blocks.length-1)+'\u0000';
+  });
+  t = escapeHtml(t);
+  t = t.replace(/`([^`]+)`/g, (_, c)=> '<code>'+c+'</code>');     // インラインコード
+  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');       // 太字
+  t = t.replace(/\n/g, '<br>');                                   // 改行
+  t = t.replace(/\u0000(\d+)\u0000/g, (_, i)=> blocks[+i]);       // コードブロックを戻す
+  return t;
+}
+
+// ---- メッセージを画面に追加 ----
+function addBubble(role, text, isError){
+  el('empty')?.remove();
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ' + (isError ? 'error' : role);
+  const label = role === 'user' ? 'あなた' : (isError ? '!' : 'AI');
+  wrap.innerHTML =
+    '<div class="avatar">'+label+'</div>' +
+    '<div class="bubble">'+ (role==='model' && !isError ? renderMarkdown(text) : escapeHtml(text)) +'</div>';
+  chatInner.appendChild(wrap);
+  scrollDown();
+  return wrap;
+}
+function scrollDown(){ const c = el('chat'); c.scrollTop = c.scrollHeight; }
+
+// ---- 「入力中…」インジケーター ----
+function showTyping(){
+  el('empty')?.remove();
+  const wrap = document.createElement('div');
+  wrap.className = 'msg model'; wrap.id = 'typing';
+  wrap.innerHTML = '<div class="avatar">AI</div><div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div>';
+  chatInner.appendChild(wrap); scrollDown();
+}
+function hideTyping(){ el('typing')?.remove(); }
+
+/* ================================================================
+   Gemini API 呼び出し（ここが心臓部）
+   ================================================================ */
+async function callGemini(){
+  const apiKey = el('apiKey').value.trim();
+  const model  = el('model').value;
+  const system = el('systemPrompt').value.trim();
+  const temp   = parseFloat(el('temp').value) || 0.7;
+
+  // エンドポイント（v1beta が現行。キーはヘッダーで渡す）
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent';
+
+  // リクエストボディ：
+  //  - system_instruction … AIの役割（毎回送る）
+  //  - contents … 会話履歴まるごと（＝文脈）
+  const body = {
+    contents: history.map(m => ({ role: m.role, parts: [{ text: m.text }] })),
+    generationConfig: { temperature: temp }
+  };
+  if(system) body.system_instruction = { parts: [{ text: system }] };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type':'application/json', 'x-goog-api-key': apiKey },
+    body: JSON.stringify(body)
+  });
+
+  if(!res.ok){
+    // エラー本文を読んで原因を表示（401=キー無効, 429=レート上限 など）
+    let detail = '';
+    try{ const j = await res.json(); detail = j.error?.message || ''; }catch(e){}
+    throw new Error('HTTP ' + res.status + (detail ? '：' + detail : ''));
+  }
+
+  const data = await res.json();
+  // 返答テキストを取り出す
+  const parts = data.candidates?.[0]?.content?.parts;
+  const text = parts?.map(p => p.text).filter(Boolean).join('') ?? '';
+  if(!text){
+    // 安全性フィルタ等で空のことがある
+    const reason = data.candidates?.[0]?.finishReason || data.promptFeedback?.blockReason;
+    throw new Error('応答が空でした' + (reason ? '（' + reason + '）' : ''));
+  }
+  return text;
+}
+
+// ---- 送信処理 ----
+async function send(){
+  if(busy) return;
+  const text = inputBox.value.trim();
+  if(!text) return;
+  if(!el('apiKey').value.trim()){
+    el('settings').classList.add('open');
+    el('apiKey').focus();
+    return;
+  }
+
+  // (1) ユーザー発言を履歴と画面へ
+  history.push({ role:'user', text });
+  addBubble('user', text);
+  inputBox.value = ''; autoGrow();
+
+  // UIをロック
+  busy = true; sendBtn.disabled = true; updateStatus('busy');
+  showTyping();
+
+  try{
+    // (2)(3) APIへ送信 → 応答を履歴と画面へ
+    const reply = await callGemini();
+    history.push({ role:'model', text: reply });
+    hideTyping();
+    addBubble('model', reply);
+  }catch(err){
+    hideTyping();
+    addBubble('model', 'リクエストに失敗しました：' + err.message, true);
+    updateStatus('err');
+  }finally{
+    busy = false; sendBtn.disabled = false;
+    if(statusText.textContent !== 'エラー') updateStatus();
+    inputBox.focus();
+  }
+}
+
+// ---- 入力欄：自動で高さ調整 ----
+function autoGrow(){
+  inputBox.style.height = 'auto';
+  inputBox.style.height = Math.min(inputBox.scrollHeight, 160) + 'px';
+}
+inputBox.addEventListener('input', autoGrow);
+
+// ---- Enterで送信 / Shift+Enterで改行 ----
+inputBox.addEventListener('keydown', e=>{
+  if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); }
+});
+sendBtn.addEventListener('click', send);
+
+// ---- 初期化 ----
+loadSettings();
+inputBox.focus();
+</script>
+</body>
+</html>
